@@ -1,3 +1,14 @@
-﻿/backend/data/*.db
+/backend/data/*.db
 /backend/node_modules/
 /frontend/node_modules/
+
+*.log
+.env
+.env.*
+
+/backend/dist/
+/backend/build/
+/frontend/dist/
+/frontend/build/
+/coverage/
+.DS_Store
