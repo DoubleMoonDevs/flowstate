@@ -1,0 +1,85 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: radial-gradient(circle at top right, #e9d5ff, #f5f3ff 40%, #fdf4ff 80%);
+}
+
+.dark body {
+  background: radial-gradient(circle at top right, #2a0a4f, #140422 45%, #0b0414 80%);
+  color: #f5f3ff;
+}
+
+.card {
+  @apply rounded-3xl bg-white/90 shadow-lg ring-1 ring-violet/20 backdrop-blur;
+}
+
+.dark .card {
+  @apply bg-[#151020]/95 ring-lilac/20 shadow-xl;
+}
+
+.btn-primary {
+  @apply rounded-2xl bg-gradient-to-r from-violet to-plum px-5 py-3 text-white text-base font-semibold shadow-md hover:shadow-lg transition;
+}
+
+.btn-ghost {
+  @apply rounded-2xl border border-lilac/60 px-4 py-3 text-ink text-base hover:bg-violet/10 transition;
+}
+
+.dark .btn-ghost {
+  @apply text-white border-lilac/30 hover:bg-white/10;
+}
+
+.dark .text-slate-400 {
+  color: #a3a3c2;
+}
+
+.dark .text-slate-500 {
+  color: #cbd5f5;
+}
+
+.dark .text-slate-600 {
+  color: #d7d7ff;
+}
+
+@layer base {
+  body {
+    @apply text-[17px];
+  }
+
+  .dark body {
+    @apply text-slate-100;
+  }
+
+  h1 {
+    @apply text-4xl md:text-5xl font-display;
+  }
+
+  h2 {
+    @apply text-2xl md:text-3xl font-display;
+  }
+
+  input,
+  select,
+  button,
+  textarea {
+    @apply text-base;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply bg-white text-ink border border-lilac/60 rounded-2xl px-4 py-3;
+  }
+
+  .dark input,
+  .dark select,
+  .dark textarea {
+    @apply bg-[#120a1a] text-slate-100 border-lilac/20 placeholder:text-slate-400;
+  }
+}
