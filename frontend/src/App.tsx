@@ -1,20 +1,8 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Dashboard from './pages/Dashboard';
-import Login from './pages/Login';
 
 export default function App() {
-  const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark');
-
-  const handleLogin = (newToken: string) => {
-    localStorage.setItem('token', newToken);
-    setToken(newToken);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    setToken(null);
-  };
 
   useEffect(() => {
     const root = document.documentElement;
@@ -27,9 +15,5 @@ export default function App() {
     }
   }, [dark]);
 
-  if (!token) {
-    return <Login onLogin={handleLogin} />;
-  }
-
-  return <Dashboard onLogout={handleLogout} dark={dark} onToggleTheme={() => setDark((v) => !v)} />;
+  return <Dashboard dark={dark} onToggleTheme={() => setDark((v) => !v)} />;
 }

@@ -9,7 +9,6 @@ import Reports from '../components/Reports';
 import Notifications from '../components/Notifications';
 
 interface Props {
-  onLogout: () => void;
   dark: boolean;
   onToggleTheme: () => void;
 }
@@ -31,7 +30,7 @@ const sections: Array<{ key: SectionKey; label: string }> = [
   { key: 'productivity', label: 'Produtividade' }
 ];
 
-export default function Dashboard({ onLogout, dark, onToggleTheme }: Props) {
+export default function Dashboard({ dark, onToggleTheme }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [finance, setFinance] = useState<FinanceItem[]>([]);
@@ -246,9 +245,6 @@ export default function Dashboard({ onLogout, dark, onToggleTheme }: Props) {
             </button>
             <button className="btn-ghost" onClick={loadAll}>
               Atualizar
-            </button>
-            <button className="btn-primary" onClick={onLogout}>
-              Sair
             </button>
           </div>
         </header>
