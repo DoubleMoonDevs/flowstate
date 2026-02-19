@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiRequest } from '../api';
 import { CalendarEvent, FinanceItem, Goal, ReportPoint, Task } from '../types';
 import CalendarView from '../components/CalendarView';
@@ -175,6 +175,53 @@ export default function Dashboard({ dark, onToggleTheme }: Props) {
     }
   };
 
+  const updateFinance = async (id: number, updates: Partial<FinanceItem>) => {
+    try {
+      const updated = await apiRequest<FinanceItem>(`/finance/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates)
+      });
+      setFinance((prev) => prev.map((item) => (item.id === id ? updated : item)));
+      notify('Gasto atualizado.', 'success');
+    } catch (err) {
+      notify((err as Error).message, 'error');
+    }
+  };
+
+  const deleteFinance = async (id: number) => {
+    try {
+      await apiRequest<void>(`/finance/${id}`, {
+        method: 'DELETE'
+      });
+      setFinance((prev) => prev.filter((item) => item.id !== id));
+      notify('Gasto removido.', 'success');
+    } catch (err) {
+      notify((err as Error).message, 'error');
+    }
+  };
+
+  const clearAllFinance = async () => {
+    const targets = finance.filter((item) => item.id);
+    if (targets.length === 0) {
+      notify('Nenhum gasto para limpar.', 'info');
+      return;
+    }
+
+    try {
+      await Promise.all(
+        targets.map((item) =>
+          apiRequest<void>(`/finance/${item.id}`, {
+            method: 'DELETE'
+          })
+        )
+      );
+      setFinance([]);
+      notify('Gastos limpos.', 'success');
+    } catch (err) {
+      notify((err as Error).message, 'error');
+    }
+  };
+
   const createEvent = async (event: CalendarEvent) => {
     try {
       const created = await apiRequest<CalendarEvent>('/calendar', {
@@ -259,7 +306,13 @@ export default function Dashboard({ dark, onToggleTheme }: Props) {
 
               <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <Goals goals={goals} onCreate={createGoal} onUpdate={updateGoal} />
-                <Finance items={finance} onCreate={createFinance} />
+                <Finance
+                  items={finance}
+                  onCreate={createFinance}
+                  onUpdate={updateFinance}
+                  onDelete={deleteFinance}
+                  onClearAll={clearAllFinance}
+                />
               </section>
 
               <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -304,7 +357,13 @@ export default function Dashboard({ dark, onToggleTheme }: Props) {
 
           {activeSection === 'finance' && (
             <section className="max-w-5xl">
-              <Finance items={finance} onCreate={createFinance} />
+              <Finance
+                items={finance}
+                onCreate={createFinance}
+                onUpdate={updateFinance}
+                onDelete={deleteFinance}
+                onClearAll={clearAllFinance}
+              />
             </section>
           )}
 

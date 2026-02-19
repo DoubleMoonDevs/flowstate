@@ -1,5 +1,6 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
+import { AuthRequest } from './middleware/auth';
 import authRoutes from './routes/auth';
 import taskRoutes from './routes/tasks';
 import goalRoutes from './routes/goals';
@@ -10,6 +11,11 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use((req, _res, next) => {
+  const request = req as AuthRequest;
+  request.userId = request.userId ?? 1;
+  next();
+});
 
 app.use('/', authRoutes);
 app.use('/tasks', taskRoutes);

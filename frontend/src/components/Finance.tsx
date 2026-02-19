@@ -1,400 +1,486 @@
-﻿import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FinanceItem } from '../types';
+
+const expenseCategories = [
+  'Cartão de crédito',
+  'Gastos fixos',
+  'Gastos variados',
+  'Pix',
+  'Débito'
+] as const;
+
+type ExpenseCategory = (typeof expenseCategories)[number];
+
+type Receivable = {
+  id: string;
+  description: string;
+  amount: number;
+  date: string;
+};
 
 interface Props {
   items: FinanceItem[];
   onCreate: (item: FinanceItem) => void;
+  onUpdate: (id: number, updates: Partial<FinanceItem>) => void;
+  onDelete: (id: number) => void;
+  onClearAll: () => void;
 }
 
-export default function Finance({ items, onCreate }: Props) {
-  const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('');
-  const [description, setDescription] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL'
+});
 
-  const [budget, setBudget] = useState('');
-  const [allocations, setAllocations] = useState({
-    orcamento: '',
-    despesas: '',
-    assinaturas: '',
-    fixos: ''
+const formatCurrency = (value: number) => currencyFormatter.format(value);
+
+const toNumber = (value: string) => {
+  const normalized = value.replace(/\./g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const readStorage = <T,>(key: string, fallback: T): T => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+};
+
+const readString = (key: string, fallback: string) => {
+  const value = localStorage.getItem(key);
+  return value ?? fallback;
+};
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+const buildSummary = (items: FinanceItem[], income: number, receivables: Receivable[]) => {
+  const totalExpenses = items.reduce((sum, item) => sum + item.amount, 0);
+  const totalsByCategory: Record<ExpenseCategory, number> = {
+    'Cartão de crédito': 0,
+    'Gastos fixos': 0,
+    'Gastos variados': 0,
+    Pix: 0,
+    Débito: 0
+  };
+  let otherExpenses = 0;
+
+  items.forEach((item) => {
+    if (expenseCategories.includes(item.category as ExpenseCategory)) {
+      totalsByCategory[item.category as ExpenseCategory] += item.amount;
+    } else {
+      otherExpenses += item.amount;
+    }
   });
-  const [reserve, setReserve] = useState('');
-  const [budgetError, setBudgetError] = useState('');
 
-  const [details, setDetails] = useState({
-    orcamento: { categoria: '', duracao: '' },
-    despesas: { categoria: '', duracao: '' },
-    assinaturas: { categoria: '', duracao: '' },
-    fixos: { categoria: '', duracao: '' },
-    reserva: { categoria: '', duracao: '' }
+  const totalReceivables = receivables.reduce((sum, item) => sum + item.amount, 0);
+  const totalIncome = income + totalReceivables;
+  const balance = totalIncome - totalExpenses;
+
+  return {
+    totalExpenses,
+    totalsByCategory,
+    otherExpenses,
+    totalReceivables,
+    totalIncome,
+    balance
+  };
+};
+
+export default function Finance({ items, onCreate, onUpdate, onDelete, onClearAll }: Props) {
+  const [monthlyIncome, setMonthlyIncome] = useState(() => readString('finance:monthlyIncome', ''));
+  const [receivables, setReceivables] = useState<Receivable[]>(() => readStorage('finance:receivables', []));
+
+  const [form, setForm] = useState({
+    description: '',
+    amount: '',
+    category: expenseCategories[0],
+    date: today()
   });
 
-  const submit = (event: React.FormEvent) => {
+  const [receivableForm, setReceivableForm] = useState({
+    description: '',
+    amount: '',
+    date: today()
+  });
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({
+    description: '',
+    amount: '',
+    category: expenseCategories[0],
+    date: today()
+  });
+
+  useEffect(() => {
+    localStorage.setItem('finance:monthlyIncome', monthlyIncome);
+  }, [monthlyIncome]);
+
+  useEffect(() => {
+    localStorage.setItem('finance:receivables', JSON.stringify(receivables));
+  }, [receivables]);
+
+  const summary = useMemo(() => {
+    return buildSummary(items, toNumber(monthlyIncome), receivables);
+  }, [items, monthlyIncome, receivables]);
+
+  const submitExpense = (event: React.FormEvent) => {
     event.preventDefault();
-    const numericAmount = Number(amount);
-    if (!category.trim() || Number.isNaN(numericAmount)) return;
-    onCreate({ amount: numericAmount, category, description, date });
-    setAmount('');
-    setCategory('');
-    setDescription('');
+    const amount = toNumber(form.amount);
+    if (amount <= 0) return;
+
+    onCreate({
+      amount,
+      category: form.category,
+      description: form.description.trim() || undefined,
+      date: form.date
+    });
+
+    setForm({
+      description: '',
+      amount: '',
+      category: expenseCategories[0],
+      date: today()
+    });
   };
 
-  const toNumber = (value: string) => Number(value) || 0;
-  const numericBudget = toNumber(budget);
-  const numericAllocations = {
-    orcamento: toNumber(allocations.orcamento),
-    despesas: toNumber(allocations.despesas),
-    assinaturas: toNumber(allocations.assinaturas),
-    fixos: toNumber(allocations.fixos),
-    reserva: toNumber(reserve)
+  const submitReceivable = (event: React.FormEvent) => {
+    event.preventDefault();
+    const amount = toNumber(receivableForm.amount);
+    if (!receivableForm.description.trim() || amount <= 0) return;
+
+    const next: Receivable = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      description: receivableForm.description.trim(),
+      amount,
+      date: receivableForm.date
+    };
+
+    setReceivables((prev) => [next, ...prev]);
+    setReceivableForm({ description: '', amount: '', date: today() });
   };
 
-  const totalAllocated =
-    numericAllocations.orcamento +
-    numericAllocations.despesas +
-    numericAllocations.assinaturas +
-    numericAllocations.fixos +
-    numericAllocations.reserva;
-
-  const remaining = Math.max(numericBudget - totalAllocated, 0);
-  const maxValue = Math.max(numericBudget, totalAllocated, 1);
-  const overBudget = totalAllocated > numericBudget && numericBudget > 0;
-  const percent = (value: number) => (numericBudget > 0 ? Math.round((value / numericBudget) * 100) : 0);
-  const canAllocate = numericBudget > 0;
-
-  const updateAllocation = (key: keyof typeof allocations, value: string) => {
-    const next = { ...allocations, [key]: value };
-    const nextTotal =
-      toNumber(next.orcamento) +
-      toNumber(next.despesas) +
-      toNumber(next.assinaturas) +
-      toNumber(next.fixos) +
-      toNumber(reserve);
-    if (numericBudget > 0 && nextTotal > numericBudget) {
-      setBudgetError('A soma dos valores não pode ultrapassar o orçamento total.');
-      return;
-    }
-    setBudgetError('');
-    setAllocations(next);
+  const startEdit = (item: FinanceItem) => {
+    if (!item.id) return;
+    setEditingId(item.id);
+    setEditForm({
+      description: item.description || '',
+      amount: String(item.amount),
+      category: expenseCategories.includes(item.category as ExpenseCategory)
+        ? (item.category as ExpenseCategory)
+        : expenseCategories[0],
+      date: item.date
+    });
   };
 
-  const updateReserve = (value: string) => {
-    const nextTotal =
-      toNumber(allocations.orcamento) +
-      toNumber(allocations.despesas) +
-      toNumber(allocations.assinaturas) +
-      toNumber(allocations.fixos) +
-      toNumber(value);
-    if (numericBudget > 0 && nextTotal > numericBudget) {
-      setBudgetError('A soma dos valores não pode ultrapassar o orçamento total.');
-      return;
-    }
-    setBudgetError('');
-    setReserve(value);
+  const cancelEdit = () => {
+    setEditingId(null);
   };
 
-  const total = items.reduce((sum, item) => sum + item.amount, 0);
+  const submitEdit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingId) return;
+    const amount = toNumber(editForm.amount);
+    if (amount <= 0) return;
+
+    onUpdate(editingId, {
+      amount,
+      category: editForm.category,
+      description: editForm.description.trim() || undefined,
+      date: editForm.date
+    });
+
+    setEditingId(null);
+  };
+
+  const removeExpense = (id?: number) => {
+    if (!id) return;
+    onDelete(id);
+  };
+
+  const removeReceivable = (id: string) => {
+    setReceivables((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const restoreAll = () => {
+    if (editingId) setEditingId(null);
+    setMonthlyIncome('');
+    setReceivables([]);
+    setForm({
+      description: '',
+      amount: '',
+      category: expenseCategories[0],
+      date: today()
+    });
+    setReceivableForm({ description: '', amount: '', date: today() });
+    onClearAll();
+  };
 
   return (
     <div className="card p-6">
-      <div className="mb-4">
-        <h2 className="text-2xl font-display font-semibold text-plum dark:text-lilac">Financeiro</h2>
-        <p className="text-base text-slate-500 dark:text-slate-300">Controle de gastos mensal.</p>
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="text-2xl font-display font-semibold text-plum dark:text-lilac">Financeiro</h2>
+          <p className="text-base text-slate-500 dark:text-slate-300">Controle de renda, recebíveis e gastos do mês.</p>
+        </div>
+        <button className="btn-ghost" onClick={restoreAll}>
+          Restaurar tudo
+        </button>
       </div>
 
-      <div className="card p-5 mb-6 border border-lilac/40 dark:border-lilac/20">
-        <h3 className="text-xl font-display font-semibold text-plum dark:text-lilac">Orçamento</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-300">
-          Preencha o orçamento total e distribua entre os tópicos.
-        </p>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 space-y-6">
+          <div className="card p-5 border border-lilac/40 dark:border-lilac/20">
+            <h3 className="text-xl font-display font-semibold text-plum dark:text-lilac">Renda e valores a receber</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-300">
+              Informe a renda mensal e registre valores pendentes.
+            </p>
 
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
-            <label className="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-300">Orçamento total</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={budget}
-              onChange={(e) => {
-                setBudget(e.target.value);
-                setBudgetError('');
-              }}
-              placeholder="Ex: 3000"
-              className="mt-2 w-full rounded-2xl border border-lilac/60 px-4 py-3"
-            />
-          </div>
-
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
-            <label className="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-300">Reserva financeira (poupança)</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={reserve}
-              onChange={(e) => updateReserve(e.target.value)}
-              placeholder="Ex: 500"
-              className="mt-2 w-full rounded-2xl border border-lilac/60 px-4 py-3"
-              disabled={!canAllocate}
-            />
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-              <input
-                value={details.reserva.categoria}
-                onChange={(e) => setDetails((prev) => ({ ...prev, reserva: { ...prev.reserva, categoria: e.target.value } }))}
-                placeholder="Categoria"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-              <input
-                value={details.reserva.duracao}
-                onChange={(e) => setDetails((prev) => ({ ...prev, reserva: { ...prev.reserva, duracao: e.target.value } }))}
-                placeholder="Duração (ex: mensal)"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
-            <label className="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-300">Gastos fixos</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={allocations.fixos}
-              onChange={(e) => updateAllocation('fixos', e.target.value)}
-              placeholder="Ex: 700"
-              className="mt-2 w-full rounded-2xl border border-lilac/60 px-4 py-3"
-              disabled={!canAllocate}
-            />
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-              <input
-                value={details.fixos.categoria}
-                onChange={(e) => setDetails((prev) => ({ ...prev, fixos: { ...prev.fixos, categoria: e.target.value } }))}
-                placeholder="Categoria"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-              <input
-                value={details.fixos.duracao}
-                onChange={(e) => setDetails((prev) => ({ ...prev, fixos: { ...prev.fixos, duracao: e.target.value } }))}
-                placeholder="Duração (ex: mensal)"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
-            <label className="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-300">Gastos variáveis</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={allocations.despesas}
-              onChange={(e) => updateAllocation('despesas', e.target.value)}
-              placeholder="Ex: 1200"
-              className="mt-2 w-full rounded-2xl border border-lilac/60 px-4 py-3"
-              disabled={!canAllocate}
-            />
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-              <input
-                value={details.despesas.categoria}
-                onChange={(e) => setDetails((prev) => ({ ...prev, despesas: { ...prev.despesas, categoria: e.target.value } }))}
-                placeholder="Categoria"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-              <input
-                value={details.despesas.duracao}
-                onChange={(e) => setDetails((prev) => ({ ...prev, despesas: { ...prev.despesas, duracao: e.target.value } }))}
-                placeholder="Duração (ex: mensal)"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
-            <label className="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-300">Assinaturas</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={allocations.assinaturas}
-              onChange={(e) => updateAllocation('assinaturas', e.target.value)}
-              placeholder="Ex: 150"
-              className="mt-2 w-full rounded-2xl border border-lilac/60 px-4 py-3"
-              disabled={!canAllocate}
-            />
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-              <input
-                value={details.assinaturas.categoria}
-                onChange={(e) =>
-                  setDetails((prev) => ({
-                    ...prev,
-                    assinaturas: { ...prev.assinaturas, categoria: e.target.value }
-                  }))
-                }
-                placeholder="Categoria"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-              <input
-                value={details.assinaturas.duracao}
-                onChange={(e) =>
-                  setDetails((prev) => ({
-                    ...prev,
-                    assinaturas: { ...prev.assinaturas, duracao: e.target.value }
-                  }))
-                }
-                placeholder="Duração (ex: mensal)"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
-            <label className="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-300">Orçamento (livre)</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={allocations.orcamento}
-              onChange={(e) => updateAllocation('orcamento', e.target.value)}
-              placeholder="Ex: 800"
-              className="mt-2 w-full rounded-2xl border border-lilac/60 px-4 py-3"
-              disabled={!canAllocate}
-            />
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-              <input
-                value={details.orcamento.categoria}
-                onChange={(e) => setDetails((prev) => ({ ...prev, orcamento: { ...prev.orcamento, categoria: e.target.value } }))}
-                placeholder="Categoria"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-              <input
-                value={details.orcamento.duracao}
-                onChange={(e) => setDetails((prev) => ({ ...prev, orcamento: { ...prev.orcamento, duracao: e.target.value } }))}
-                placeholder="Duração (ex: mensal)"
-                className="rounded-2xl border border-lilac/60 px-4 py-2"
-                disabled={!canAllocate}
-              />
-            </div>
-          </div>
-        </div>
-
-        {budgetError && (
-          <div className="mt-4 rounded-2xl border border-rose/40 bg-rose/10 p-3 text-rose text-sm">
-            {budgetError}
-          </div>
-        )}
-
-        <div className="mt-5 grid grid-cols-1 md:grid-cols-5 gap-3 text-sm text-slate-600 dark:text-slate-300">
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-3 bg-white/70 dark:bg-[#120a1a]">
-            Total orçado: <span className="font-semibold">R$ {numericBudget.toFixed(2)}</span>
-          </div>
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-3 bg-white/70 dark:bg-[#120a1a]">
-            Total dividido: <span className="font-semibold">R$ {totalAllocated.toFixed(2)}</span>
-          </div>
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-3 bg-white/70 dark:bg-[#120a1a]">
-            Restante: <span className="font-semibold">R$ {remaining.toFixed(2)}</span>
-          </div>
-          {overBudget && (
-            <div className="rounded-2xl border border-rose/40 p-3 bg-rose/10 text-rose font-semibold">
-              Ultrapassou o orçamento
-            </div>
-          )}
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
-            <p className="text-sm text-slate-500 dark:text-slate-300">Gráfico do orçamento</p>
-            <div className="mt-4 h-4 rounded-full bg-violet/10 dark:bg-[#1d1328] overflow-hidden flex">
-              {[
-                { key: 'fixos', value: numericAllocations.fixos, color: 'bg-rose' },
-                { key: 'despesas', value: numericAllocations.despesas, color: 'bg-plum' },
-                { key: 'assinaturas', value: numericAllocations.assinaturas, color: 'bg-lilac' },
-                { key: 'orcamento', value: numericAllocations.orcamento, color: 'bg-violet-500' },
-                { key: 'reserva', value: numericAllocations.reserva, color: 'bg-mint' }
-              ].map((item) => (
-                <div
-                  key={item.key}
-                  className={`h-4 ${item.color}`}
-                  style={{ width: `${Math.min((item.value / maxValue) * 100, 100)}%` }}
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
+                <label className="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-300">Renda mensal</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={monthlyIncome}
+                  onChange={(e) => setMonthlyIncome(e.target.value)}
+                  placeholder="Ex: 3500"
+                  className="mt-2 w-full rounded-2xl border border-lilac/60 px-4 py-3"
                 />
-              ))}
+              </div>
+
+              <form
+                onSubmit={submitReceivable}
+                className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]"
+              >
+                <label className="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-300">Adicionar recebível</label>
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  <input
+                    value={receivableForm.description}
+                    onChange={(e) => setReceivableForm((prev) => ({ ...prev, description: e.target.value }))}
+                    placeholder="Descrição"
+                    className="rounded-2xl border border-lilac/60 px-4 py-2"
+                  />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={receivableForm.amount}
+                    onChange={(e) => setReceivableForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    placeholder="Valor"
+                    className="rounded-2xl border border-lilac/60 px-4 py-2"
+                  />
+                  <input
+                    type="date"
+                    value={receivableForm.date}
+                    onChange={(e) => setReceivableForm((prev) => ({ ...prev, date: e.target.value }))}
+                    className="rounded-2xl border border-lilac/60 px-4 py-2"
+                  />
+                </div>
+                <button className="btn-primary mt-3" type="submit">
+                  Adicionar
+                </button>
+              </form>
             </div>
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">
-              As cores representam como o orçamento foi dividido.
+
+            <div className="mt-4 space-y-2">
+              {receivables.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-3 bg-white dark:bg-[#120a1a] flex items-center justify-between"
+                >
+                  <div>
+                    <p className="font-semibold">{item.description}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-300">{item.date}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold">{formatCurrency(item.amount)}</p>
+                    <button className="btn-ghost mt-1" onClick={() => removeReceivable(item.id)}>
+                      Remover
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {receivables.length === 0 && (
+                <p className="text-sm text-slate-500 dark:text-slate-300">Nenhum valor a receber registrado.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="card p-5 border border-lilac/40 dark:border-lilac/20">
+            <h3 className="text-xl font-display font-semibold text-plum dark:text-lilac">Registrar gasto</h3>
+            <form onSubmit={submitExpense} className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+              <input
+                value={form.description}
+                onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                placeholder="Descrição"
+                className="rounded-2xl border border-lilac/60 px-4 py-3"
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                value={form.amount}
+                onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
+                placeholder="Valor"
+                className="rounded-2xl border border-lilac/60 px-4 py-3"
+              />
+              <select
+                value={form.category}
+                onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value as ExpenseCategory }))}
+                className="rounded-2xl border border-lilac/60 px-4 py-3"
+              >
+                {expenseCategories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={form.date}
+                onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))}
+                type="date"
+                className="rounded-2xl border border-lilac/60 px-4 py-3"
+              />
+              <button className="btn-primary md:col-span-4" type="submit">
+                Registrar gasto
+              </button>
+            </form>
+          </div>
+
+          <div className="card p-5 border border-lilac/40 dark:border-lilac/20">
+            <h3 className="text-xl font-display font-semibold text-plum dark:text-lilac">Gastos registrados</h3>
+            <div className="mt-4 space-y-2">
+              {items.map((item) => {
+                const isEditing = editingId === item.id;
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white dark:bg-[#120a1a]"
+                  >
+                    {isEditing ? (
+                      <form onSubmit={submitEdit} className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                        <input
+                          value={editForm.description}
+                          onChange={(e) => setEditForm((prev) => ({ ...prev, description: e.target.value }))}
+                          className="rounded-2xl border border-lilac/60 px-3 py-2"
+                        />
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={editForm.amount}
+                          onChange={(e) => setEditForm((prev) => ({ ...prev, amount: e.target.value }))}
+                          className="rounded-2xl border border-lilac/60 px-3 py-2"
+                        />
+                        <select
+                          value={editForm.category}
+                          onChange={(e) => setEditForm((prev) => ({ ...prev, category: e.target.value as ExpenseCategory }))}
+                          className="rounded-2xl border border-lilac/60 px-3 py-2"
+                        >
+                          {expenseCategories.map((category) => (
+                            <option key={category} value={category}>
+                              {category}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="date"
+                          value={editForm.date}
+                          onChange={(e) => setEditForm((prev) => ({ ...prev, date: e.target.value }))}
+                          className="rounded-2xl border border-lilac/60 px-3 py-2"
+                        />
+                        <div className="md:col-span-4 flex items-center gap-2">
+                          <button className="btn-primary" type="submit">
+                            Salvar
+                          </button>
+                          <button className="btn-ghost" type="button" onClick={cancelEdit}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{item.description || 'Sem descrição'}</p>
+                          <p className="text-sm text-slate-500 dark:text-slate-300">
+                            {item.category} · {item.date}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold">{formatCurrency(item.amount)}</p>
+                          <div className="mt-2 flex items-center justify-end gap-2">
+                            <button className="btn-ghost" onClick={() => startEdit(item)}>
+                              Editar
+                            </button>
+                            <button className="btn-ghost" onClick={() => removeExpense(item.id)}>
+                              Remover
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {items.length === 0 && (
+                <p className="text-sm text-slate-500 dark:text-slate-300">Nenhum gasto registrado.</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="card p-5 border border-lilac/40 dark:border-lilac/20">
+            <h3 className="text-xl font-display font-semibold text-plum dark:text-lilac">Resumo financeiro</h3>
+            <div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
+              <div className="flex items-center justify-between">
+                <span>Total gasto</span>
+                <span className="font-semibold">{formatCurrency(summary.totalExpenses)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Total a receber</span>
+                <span className="font-semibold">{formatCurrency(summary.totalReceivables)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Renda + Recebíveis</span>
+                <span className="font-semibold">{formatCurrency(summary.totalIncome)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Saldo final</span>
+                <span
+                  className={`font-semibold ${summary.balance >= 0 ? 'text-mint' : 'text-rose'}`}
+                >
+                  {formatCurrency(summary.balance)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card p-5 border border-lilac/40 dark:border-lilac/20">
+            <h3 className="text-xl font-display font-semibold text-plum dark:text-lilac">Gastos por categoria</h3>
+            <div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
+              {expenseCategories.map((category) => (
+                <div key={category} className="flex items-center justify-between">
+                  <span>{category}</span>
+                  <span className="font-semibold">{formatCurrency(summary.totalsByCategory[category])}</span>
+                </div>
+              ))}
+              {summary.otherExpenses > 0 && (
+                <div className="flex items-center justify-between">
+                  <span>Outros</span>
+                  <span className="font-semibold">{formatCurrency(summary.otherExpenses)}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card p-5 border border-lilac/40 dark:border-lilac/20">
+            <h3 className="text-xl font-display font-semibold text-plum dark:text-lilac">Fórmula aplicada</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-300">
+              Saldo = (Renda mensal + Valores a receber) - Total de gastos
             </p>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {[
-              { label: 'Gastos fixos', value: numericAllocations.fixos },
-              { label: 'Gastos variáveis', value: numericAllocations.despesas },
-              { label: 'Assinaturas', value: numericAllocations.assinaturas },
-              { label: 'Reserva', value: numericAllocations.reserva },
-              { label: 'Orçamento livre', value: numericAllocations.orcamento }
-            ].map((item) => (
-              <div key={item.label} className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white/70 dark:bg-[#120a1a]">
-                <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-300">
-                  <span>{item.label}</span>
-                  <span className="font-semibold">R$ {item.value.toFixed(2)}</span>
-                </div>
-                <div className="mt-2 text-xs text-slate-500 dark:text-slate-300">
-                  {percent(item.value)}% do orçamento
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
-      </div>
-
-      <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <input
-          type="number"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          className="rounded-2xl border border-lilac/60 px-4 py-3"
-        />
-        <input
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          placeholder="Categoria"
-          className="rounded-2xl border border-lilac/60 px-4 py-3"
-        />
-        <input
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          type="date"
-          className="rounded-2xl border border-lilac/60 px-4 py-3"
-        />
-        <button className="btn-primary" type="submit">
-          Registrar
-        </button>
-      </form>
-
-      <div className="mt-4 text-base text-slate-600 dark:text-slate-300">Total do mês: R$ {total.toFixed(2)}</div>
-
-      <div className="mt-4 space-y-2">
-        {items.map((item) => (
-          <div key={item.id} className="rounded-2xl border border-lilac/40 dark:border-lilac/20 p-4 bg-white dark:bg-[#120a1a] flex justify-between">
-            <div>
-              <p className="font-semibold">{item.category}</p>
-              <p className="text-sm text-slate-500 dark:text-slate-300">{item.description || 'Sem descrição'}</p>
-            </div>
-            <div className="text-right">
-              <p className="font-semibold">R$ {item.amount.toFixed(2)}</p>
-              <p className="text-sm text-slate-500 dark:text-slate-300">{item.date}</p>
-            </div>
-          </div>
-        ))}
-        {items.length === 0 && <p className="text-sm text-slate-500 dark:text-slate-300">Nenhum gasto registrado.</p>}
       </div>
     </div>
   );
